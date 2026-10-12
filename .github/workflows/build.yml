@@ -1,0 +1,60 @@
+name: Build OpenWrt WS2812 Driver
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build MT7628 WS2812 Kernel Driver (OpenWrt 23.05.5)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip zlib1g-dev file python3 wget xz-utils rsync ccache
+
+      - name: Download and Unpack OpenWrt 23.05.5 SDK
+        run: |
+          SDK_URL="https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+          echo "Downloading OpenWrt 23.05.5 SDK..."
+          wget -q --show-progress "$SDK_URL" -O sdk.tar.xz
+          mkdir sdk
+          tar -xJf sdk.tar.xz -C sdk --strip-components=1
+          rm sdk.tar.xz
+          echo "SDK prepared successfully."
+
+      - name: Inject ws2812 Package into SDK
+        run: |
+          mkdir -p sdk/package/ws2812-draiveris
+          cp Makefile sdk/package/ws2812-draiveris/
+          cp -r src sdk/package/ws2812-draiveris/
+          echo "CONFIG_PACKAGE_kmod-ws2812-draiveris=m" >> sdk/.config
+          make -C sdk defconfig
+
+      - name: Compile Kernel Module
+        run: |
+          echo "Building ws2812-draiveris module..."
+          make -C sdk package/ws2812-draiveris/compile V=s -j$(nproc)
+
+      - name: Collect Artifacts
+        run: |
+          mkdir -p artifacts
+          echo "Locating built files..."
+          find sdk/bin/ -name "*ws2812*.ipk" -exec cp -v {} artifacts/ \; || true
+          find sdk/build_dir/ -name "ws2812-draiveris.ko" -exec cp -v {} artifacts/ \; || true
+          ls -lh artifacts/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws2812-mt7628-openwrt-23.05.5
+          path: artifacts/*
+          if-no-files-found: error
